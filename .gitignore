@@ -1,0 +1,38 @@
+# ---- Confidential assignment materials: NEVER commit these ----
+# The assignment PDF and real ticket data are Propel-internal and must stay
+# out of git history entirely (the brief and the PDF both require this).
+data/dhaba_tickets.json
+*.pdf
+Propel_Full_Stack_AI_Engineer_Assignment.pdf
+Propel_Claude_Build_and_Pairing_Brief.md
+
+# ---- Secrets ----
+.env
+.env.local
+*.key
+
+# ---- Local databases / replay artifacts that may contain ticket-derived data ----
+*.db
+*.sqlite
+*.sqlite3
+replay_output.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+venv/
+.venv/
+env/
+build/
+dist/
+
+# ---- OS / editor ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.local.md
