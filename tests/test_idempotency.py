@@ -63,11 +63,16 @@ def test_second_submission_returns_stored_not_recomputed():
 def test_storage_does_not_persist_ticket_body():
     db = tempfile.mktemp(suffix=".db")
     storage = Storage(db)
+    # Synthetic PII (NOT the real ticket's): we only need to prove that whatever
+    # identifying text is in a body never lands in storage. Using a fake company
+    # and a fake GSTIN keeps confidential ticket content out of this public repo.
+    secret_company = "Example Traders Pvt Ltd"
+    secret_gstin = "00FAKE0000F0Z0"
     t = Ticket(
         id="T-GSTIN",
         received_at="t",
         subject="invoice needed",
-        body="company Example Traders Pvt Ltd, GSTIN 00FAKE0000F0Z0",
+        body=f"company {secret_company}, GSTIN {secret_gstin}",
         purchases=[
             {"id": "p1", "type": "renewal", "amount_inr": 1499, "status": "successful", "at": "t"}
         ],
@@ -77,6 +82,6 @@ def test_storage_does_not_persist_ticket_body():
     raw = sqlite3.connect(db).execute(
         "SELECT response_json FROM triage_decisions WHERE ticket_id=?", (t.id,)
     ).fetchone()[0]
-    assert "00FAKE0000F0Z0" not in raw
-    assert "Example Traders Pvt Ltd" not in raw
+    assert secret_gstin not in raw
+    assert secret_company not in raw
     storage.close()

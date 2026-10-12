@@ -50,7 +50,11 @@ def test_log_line_has_no_pii():
     finally:
         logging_config._logger.handlers = original
     out = buf.getvalue().lower()
-    for leak in ("29abcde1234f1z5", "acme interiors", "gstin", "father", "cyber cell"):
+    # None of these free-text markers may appear in a log line. The log helper
+    # takes no body/subject parameter, so a logged event can only contain the
+    # allowlisted structured fields — never a company name, a GST number, or any
+    # body text. (Generic tokens here; we don't repeat real ticket content.)
+    for leak in ("gstin", "invoice for", "company", "subject", "body"):
         assert leak not in out
 
 
