@@ -26,7 +26,11 @@ import json
 import os
 from typing import Optional
 
-import httpx
+# NOTE: httpx is imported lazily inside classify_with_llm(), not at module top.
+# Why: fixture mode must work even on a machine where httpx isn't installed. If
+# we imported httpx here, merely importing app.llm (which app.triage does) would
+# crash in a fixture-only environment. The network dependency should only be
+# required when a network call is actually made.
 
 from app.schemas import ModelClassification
 
@@ -136,6 +140,14 @@ def classify_with_llm(
         # should be in fixture mode instead. We raise so nothing silently
         # pretends to have called a model.
         raise LLMError("LLM mode requested but LLM_API_KEY is not set")
+
+    # Lazy import: only needed when we actually make a network call.
+    try:
+        import httpx
+    except ImportError as e:  # pragma: no cover - environment-specific
+        raise LLMError(
+            "httpx is required for LLM mode; install it or use fixture mode"
+        ) from e
 
     messages = _build_messages(subject, body)
     payload = {
