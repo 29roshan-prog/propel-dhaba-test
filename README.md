@@ -90,7 +90,8 @@ File map:
 | `app/security.py` | Prompt-injection detection + safe handling. |
 | `app/storage.py` | SQLite idempotency (`UNIQUE ticket_id`). Minimal, PII-free. |
 | `app/logging_config.py` | Structured logs from an allowlisted field set. |
-| `scripts/replay_tickets.py` | Runs all 12 tickets, emits the table in §10. |
+| `scripts/replay_tickets.py` | Runs all 12 tickets in deterministic fixture mode. |
+| `scripts/replay_tickets_llm.py` | Optional live LLM replay; requires `.env` configuration and a provider key. |
 | `tests/` | Schema, policy, injection, fallback, idempotency, privacy, API. |
 
 ## 3. Setup from a clean machine
@@ -221,11 +222,13 @@ Concrete rules (all in `app/policy.py`):
   amount** exist. One `failed` + one `successful` (T-1009) is a single charge.
   A genuine duplicate recommends refunding **exactly one** charge, capped, and
   still needs human approval.
-- **Billing disputes over a valid charge** (T-1001 trial→activate, T-1006
-  autopay claim, T-1012 review threat): the charge is valid; a goodwill/policy
-  refund is a human decision, not an automatic one.
-- **Cancellation ≠ refund.** "cancel" (T-1004) stops future billing; it never
-  authorises returning past money.
+- **Billing disputes over a successful charge** (T-1001 trial→activate, T-1006
+  autopay claim, T-1012 review threat): a successful charge is verified, but
+  that alone does not prove the disputed renewal was properly authorised. A
+  human verifies the billing/cancellation timeline and applies the actual policy.
+- **Cancellation ≠ refund.** A cancellation request alone does not authorise
+  returning past money. If a successful renewal exists, the audit reason surfaces
+  that evidence and asks a human to verify when cancellation became effective.
 - **Invoice/feature/plan/technical** requests need no refund decision.
 - A refund amount **never exceeds a single verified successful charge** and is
   **never duplicated**.
@@ -242,9 +245,14 @@ returns a conservative `safe_fallback_response` (unknown / no refund / human).
 
 **Idempotency.** `POST /triage` with a `ticket_id` already seen returns the
 **stored** decision and does not recompute — so a re-delivery can't produce a
-second, different side effect. The `UNIQUE` primary key on `ticket_id` makes
-this race-safe (concurrent double-delivery: one INSERT wins, the other reads the
-stored row).
+second, different side effect. The `UNIQUE` primary key on `ticket_id` is the final database guard. Because
+this app shares one SQLite connection across worker threads, `Storage` also uses
+a re-entrant lock to serialize each connection transaction. A concurrent duplicate
+test sends 16 requests across 8 threads and verifies identical responses and one
+stored row. The handler may still do redundant classification work if requests
+arrive simultaneously before either has stored its result; a production service
+can add a per-ticket in-flight lock or move work behind a queue to avoid duplicate
+LLM calls.
 
 *Triage-dedup vs external-refund-dedup* (the brief asks): this service dedups
 the **triage decision**. It issues no real refund, so there's no external money
@@ -415,17 +423,17 @@ shaped by my review and corrections (~25%).
 This is the instruction that produced the central design — `policy.py` as a pure
 function the model can't reach.
 
-**One genuine mistake caught** (not manufactured): `app/llm.py` originally did
-`import httpx` at the top of the module. Because `app/triage.py` imports
-`app/llm.py`, that made the **entire fixture path depend on httpx** — on a
-machine without httpx installed, even offline fixture mode would crash on import.
-I caught it when `python tests/run_stdlib.py` reported
-`IMPORT ERROR tests.test_fallback: No module named 'httpx'`. Fix: move the
-import to be **lazy**, inside `classify_with_llm()`, so it's only required when a
-network call is actually made. Verified afterwards that fixture triage runs with
-httpx absent. (A second, smaller issue was a *test* I wrote that wrongly asserted
-T-1005 had zero successful purchases — it has a successful ₹1 trial; only the
-₹249 renewal is `initiated`. The code was right; I fixed the assertion.)
+**A concrete logic gap caught during review:** the live LLM classified T-1006
+as `cancellation`, which was plausible, but the cancellation policy reason only
+said that cancellation does not imply a refund. It did not surface the verified
+₹1,499 renewal in the ledger or explain that the effective cancellation timeline
+was unknown. That could make a human reviewer miss important evidence even
+though the money outcome stayed conservative. I changed the cancellation branch
+to include successful-renewal evidence in its audit reason and explicitly ask a
+human to verify the timeline; I added a regression test for that case. The refund
+remains ₹0 pending review. This is a real gap found by comparing the model output
+with the structured billing records, not a claim that the model's category alone
+should control the money decision.
 
 **One part written/decided by hand:** the per-ticket refund reasoning and the
 category↔ticket mapping (`docs/`, and the policy branches) — directing an agent
@@ -440,10 +448,13 @@ defending *why* each decision is safe.
   routes to a human. It is not an ML model and isn't meant to be.
 - **Confidence is heuristic, not calibrated.** Treat it as a routing signal, not
   a probability.
-- **No real LLM call was exercised end-to-end in this environment** (no API key
-  / network); the `llm.py` path is unit-tested with mocked responses and the
-  parse/validate/fallback logic is covered, but a live provider run is untested
-  here. On a machine with a key, set `TRIAGE_MODE=llm`.
+- **Live LLM replay was run on the candidate's configured machine:** all 12
+  tickets returned `mode=llm` and the script reported zero fallback results.
+  This confirms the application reported successful LLM-mode runs for that
+  execution; the provider name and raw provider telemetry should only be claimed
+  if independently recorded. Re-run `scripts/replay_tickets_llm.py` when you
+  want to verify the current local configuration. The standard test suite uses
+  deterministic fixtures/mocks and does not require a live API key.
 - **Injection detection is a heuristic flag**, not a security boundary. The real
   defences are architectural (body never reaches the money gate; body is data,
   not instructions). Detection can have false negatives; safety doesn't depend

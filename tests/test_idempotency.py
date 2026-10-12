@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 from app.handler import handle_triage
 from app.schemas import Ticket
@@ -84,4 +85,23 @@ def test_storage_does_not_persist_ticket_body():
     ).fetchone()[0]
     assert secret_gstin not in raw
     assert secret_company not in raw
+    storage.close()
+
+
+def test_concurrent_same_ticket_returns_one_stored_decision():
+    """Concurrent duplicate deliveries must not corrupt SQLite or diverge."""
+    db = tempfile.mktemp(suffix=".db")
+    storage = Storage(db)
+    ticket = _ticket("T-CONCURRENT")
+
+    # Simulate simultaneous duplicate deliveries against the same app storage.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: handle_triage(ticket, storage), range(16)))
+
+    expected = results[0].model_dump(mode="json")
+    assert all(result.model_dump(mode="json") == expected for result in results)
+    count = sqlite3.connect(db).execute(
+        "SELECT COUNT(*) FROM triage_decisions WHERE ticket_id=?", (ticket.id,)
+    ).fetchone()[0]
+    assert count == 1
     storage.close()

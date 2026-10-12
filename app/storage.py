@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from typing import Optional
@@ -56,8 +57,10 @@ class Storage:
 
     def __init__(self, db_path: str = "triage.db"):
         self.db_path = db_path
-        # check_same_thread=False so a FastAPI worker thread can reuse it; we
-        # keep writes short and rely on SQLite's own locking.
+        # FastAPI may call this instance from multiple worker threads. SQLite's
+        # file locks protect separate connections, but this object shares ONE
+        # connection, so serialize its cursor/transaction lifecycle as well.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL;")  # safer concurrent reads
         self._conn.executescript(_SCHEMA)
@@ -65,12 +68,15 @@ class Storage:
 
     @contextmanager
     def _cursor(self):
-        cur = self._conn.cursor()
-        try:
-            yield cur
-            self._conn.commit()
-        finally:
-            cur.close()
+        # Hold the lock until commit/close; otherwise concurrent calls could
+        # interleave operations on the same sqlite3 connection.
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                yield cur
+                self._conn.commit()
+            finally:
+                cur.close()
 
     def get(self, ticket_id: str) -> Optional[TriageResponse]:
         """Return the stored decision for this ticket id, or None."""
@@ -129,4 +135,5 @@ class Storage:
             return (stored or response), False
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()

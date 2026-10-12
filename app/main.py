@@ -19,7 +19,12 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
+# Load local development configuration before importing modules that read env vars.
+# In deployed environments, process environment variables remain supported.
+load_dotenv()
 
 from app.handler import handle_triage
 from app.schemas import Ticket, TriageResponse

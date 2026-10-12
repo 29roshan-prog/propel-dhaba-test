@@ -251,17 +251,39 @@ def decide_refund(ticket: Ticket, category: Category) -> Tuple[Refund, bool, Lis
     # scope.
     # ------------------------------------------------------------------ #
     if category == Category.CANCELLATION:
-        reasons.append(
-            "Cancellation intent detected. Cancelling future billing is not the "
-            "same as refunding a past charge; no refund is authorised by the "
-            "request alone."
-        )
+        # A cancellation label can hide a dispute about a completed renewal
+        # (T-1006). Do not inspect free text here: the classifier owns intent,
+        # while this gate reports only what the structured ledger proves.
+        successful_renewals = [
+            p for p in succ if p.type.value == "renewal"
+        ]
+        if successful_renewals:
+            latest_renewal_amount = successful_renewals[-1].amount_inr
+            reasons.append(
+                f"Cancellation intent detected and the ledger contains a "
+                f"successful renewal of INR {latest_renewal_amount}. The ledger "
+                "does not establish whether cancellation was requested or "
+                "effective before renewal; a human must verify the timeline "
+                "and applicable policy."
+            )
+            refund_reason = (
+                "Successful renewal recorded; verify cancellation timing and "
+                "refund eligibility with a human. No refund inferred."
+            )
+        else:
+            reasons.append(
+                "Cancellation intent detected. Cancelling future billing is not "
+                "the same as refunding a past charge; no refund is authorised by "
+                "the request alone."
+            )
+            refund_reason = (
+                "Cancellation request; confirm scope with user. No refund inferred."
+            )
         return (
             Refund(
                 recommendation=RefundRecommendation.NEEDS_HUMAN,
                 amount_inr=0,
-                reason="Cancellation request; confirm scope with user. No refund "
-                "inferred.",
+                reason=refund_reason,
             ),
             True,
             reasons,

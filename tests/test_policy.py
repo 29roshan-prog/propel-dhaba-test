@@ -143,3 +143,51 @@ def test_cancellation_does_not_infer_refund():
     assert refund.recommendation == RefundRecommendation.NEEDS_HUMAN
     assert refund.amount_inr == 0
     assert human is True
+
+
+def test_cancellation_with_successful_renewal_surfaces_billing_evidence():
+    """A cancellation label must not hide a completed renewal (T-1006 shape)."""
+    t = Ticket(
+        id="T-CANCEL-RENEWAL",
+        received_at="t",
+        subject="annual plan renewed, I wanted to stop",
+        body="I turned off autopay and please reverse the charge",
+        purchases=[
+            {"id": "p1", "type": "renewal", "amount_inr": 1499, "status": "successful", "at": "2025-09-04T12:00:00+05:30"},
+            {"id": "p2", "type": "renewal", "amount_inr": 1499, "status": "successful", "at": "2026-09-04T12:01:00+05:30"},
+        ],
+        app_opens_since_renewal=0,
+    )
+    refund, human, reasons = decide_refund(t, Category.CANCELLATION)
+    assert refund.recommendation == RefundRecommendation.NEEDS_HUMAN
+    assert refund.amount_inr == 0
+    assert human is True
+    assert "successful renewal of INR 1499" in " ".join(reasons)
+    assert "verify the timeline" in " ".join(reasons)
+
+def test_single_successful_payment_does_not_trigger_duplicate_refund():
+    ticket = Ticket(
+        id="T-SINGLE",
+        received_at="2026-10-12T20:00:00+05:30",
+        subject="Charged twice",
+        body="I believe I was charged twice.",
+        purchases=[
+            {
+                "id": "p1",
+                "type": "renewal",
+                "amount_inr": 999,
+                "status": "successful",
+                "at": "2026-10-12T10:00:00+05:30",
+            }
+        ],
+        app_opens_since_renewal=1,
+    )
+
+    refund, needs_human, reasons = decide_refund(
+        ticket, Category.DUPLICATE_CHARGE
+    )
+
+    assert refund.recommendation != RefundRecommendation.RECOMMENDED
+    assert refund.amount_inr == 0
+    assert needs_human is True
+    assert any("only one" in reason for reason in reasons)

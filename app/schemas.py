@@ -218,4 +218,4 @@ class ModelClassification(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reply_draft: str
 
-    model_config = {"extra": "ignore"}  # tolerate extra keys the model adds
+    model_config = {"extra": "forbid"}  # reject unexpected fields, especially money/action fields

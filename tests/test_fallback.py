@@ -60,6 +60,33 @@ def test_parse_accepts_valid_json_with_extra_prose():
     assert result.category.value == "billing_dispute"
 
 
+
+def test_parse_rejects_model_attempting_to_supply_refund():
+    """The LLM schema must not silently accept a model-generated money field."""
+    with pytest.raises(LLMError):
+        _parse_response(
+            '{"category":"billing_dispute","severity":"medium",'
+            '"confidence":0.9,"reply_draft":"We will review this.",'
+            '"refund":{"recommendation":"recommended","amount_inr":1499}}'
+        )
+
+
+def test_parse_rejects_wrong_reply_type():
+    """A syntactically valid JSON object is not enough; field types must validate."""
+    with pytest.raises(LLMError):
+        _parse_response(
+            '{"category":"billing_dispute","severity":"medium",'
+            '"confidence":0.9,"reply_draft":42}'
+        )
+
+
+def test_parse_rejects_out_of_range_confidence():
+    with pytest.raises(LLMError):
+        _parse_response(
+            '{"category":"billing_dispute","severity":"medium",'
+            '"confidence":1.5,"reply_draft":"We will review this."}'
+        )
+
 def test_fixture_mode_works_without_api_key(monkeypatch):
     """#11: no key set, fixture mode still returns a valid response."""
     monkeypatch.delenv("LLM_API_KEY", raising=False)

@@ -16,6 +16,7 @@ Propel_Claude_Build_and_Pairing_Brief.md
 *.sqlite
 *.sqlite3
 replay_output.json
+llm_replay_results.json
 
 # ---- Python ----
 __pycache__/
